@@ -13,6 +13,8 @@ case class Flow(f: Int)
 case class Debug(debug: Boolean)
 case class Control(control: ActorRef)
 case class Source(n: Int)
+case class AskToPush(excess: Int, height: Int, sender: ActorRef)
+case class PushResponse(accepted: Boolean, responseTo: AskToPush)
 
 case object Print
 case object Start
@@ -31,8 +33,9 @@ class Node(val index: Int) extends Actor {
   var control: ActorRef = null  // controller to report to when e is zero.
   var source: Boolean   = false // true if we are the source.
   var sink: Boolean     = false // true if we are the sink.
-  var edge: List[Edge]  = Nil   // adjacency list with edge objects shared with other nodes.
+  var edges: List[Edge] = Nil   // adjacency list with edge objects shared with other nodes.
   var debug             = false // to enable printing.
+  var lastSentTo: Int = 0  // Index of last node we tried to push to
 
   def min(a: Int, b: Int): Int = if (a < b) a else b
 
@@ -74,8 +77,8 @@ class Node(val index: Int) extends Actor {
     }
 
     case edge: Edge => {
-      this.edge =
-        edge :: this.edge // put this edge first in the adjacency-list.
+      this.edges =
+        edge :: this.edges // put this edge first in the adjacency-list.
     }
 
     case Control(control: ActorRef) => this.control = control
@@ -84,6 +87,23 @@ class Node(val index: Int) extends Actor {
 
     case Source(n: Int) => { height = n; source = true }
 
+    case AskToPush(excess: Int, height: Int, sender: ActorRef) =>
+      if (this.height < height) {
+        sender ! PushResponse(true, AskToPush(excess, height, sender))
+        this.excess += excess
+        for (edge <- edges) {
+          if (excess > 0) {
+            val otherNode = other(edge, self)
+            val toSend    = min(excess, edge.c)
+            otherNode ! AskToPush(toSend, this.height, self)
+            this.excess -= toSend
+          }
+        }
+      }
+
+    case PushResponse(accepted: Boolean, responseTo: AskToPush) =>
+      if (!accepted) this.excess += excess
+
     case m => {
       println(s"$index received an unknown message: $m")
     }
@@ -91,28 +111,43 @@ class Node(val index: Int) extends Actor {
     assert(false)
   }
 
+  def edgesToSendTo: List[Edge]  = {
+    val (previous, next) = edges.splitAt(lastSentTo)
+    return next ++ previous
+  }
+
+  def sendToEveryone = for (edge <- edgesToSendTo) {
+    if (excess > 0) {
+      val otherNode = other(edge, self)
+      val toSend    = min(excess, edge.c)
+      otherNode ! AskToPush(toSend, this.height, self)
+      this.excess -= toSend
+      lastSentTo = edges.indexOf(edge)
+    }
+  }
+
 }
 
 class Preflow extends Actor {
-  var sourceIndex           = 0;   // index of source node.
-  var sinkIndex             = 0;   // index of sink node.
-  var vertexCount                     = 0;   // number of vertices in the graph.
-  var edge: Array[Edge]     = null // edges in the graph.
-  var node: Array[ActorRef] = null // vertices in the graph.
-  var ret: ActorRef         = null // Actor to send result to.
+  var sourceIndex            = 0;   // index of source node.
+  var sinkIndex              = 0;   // index of sink node.
+  var vertexCount            = 0;   // number of vertices in the graph.
+  var edges: Array[Edge]     = null // edges in the graph.
+  var nodes: Array[ActorRef] = null // vertices in the graph.
+  var ret: ActorRef          = null // Actor to send result to.
 
   def receive = {
 
     case node: Array[ActorRef] => {
-      this.node = node
-      vertexCount = node.size
+      this.nodes = nodes
+      vertexCount = nodes.size
       sourceIndex = 0
       sinkIndex = vertexCount - 1
       for (u <- node)
         u ! Control(self)
     }
 
-    case edge: Array[Edge] => this.edge = edge
+    case edges: Array[Edge] => this.edges = edges
 
     case Flow(f: Int) => {
       ret ! f // somebody (hopefully the sink) told us its current excess preflow.
@@ -121,7 +156,7 @@ class Preflow extends Actor {
     case Maxflow => {
       ret = sender
 
-      node(
+      nodes(
         sinkIndex
       ) ! Excess // ask sink for its excess preflow (which certainly still is zero).
     }
@@ -135,10 +170,10 @@ object main extends App {
   val system  = ActorSystem("Main")
   val control = system.actorOf(Props[Preflow], name = "control")
 
-  var nodeCount             = 0;
-  var edgeCount             = 0;
-  var edge: Array[Edge]     = null
-  var node: Array[ActorRef] = null
+  var nodeCount              = 0;
+  var edgeCount              = 0;
+  var edges: Array[Edge]     = null
+  var nodes: Array[ActorRef] = null
 
   val scanner = new Scanner(System.in);
 
@@ -149,12 +184,12 @@ object main extends App {
   scanner.nextInt
   scanner.nextInt
 
-  node = new Array[ActorRef](nodeCount)
+  nodes = new Array[ActorRef](nodeCount)
 
   for (i <- 0 to nodeCount - 1)
-    node(i) = system.actorOf(Props(new Node(i)), name = "v" + i)
+    nodes(i) = system.actorOf(Props(new Node(i)), name = "v" + i)
 
-  edge = new Array[Edge](edgeCount)
+  edges = new Array[Edge](edgeCount)
 
   for (i <- 0 to edgeCount - 1) {
 
@@ -162,14 +197,14 @@ object main extends App {
     val v        = scanner.nextInt
     val capacity = scanner.nextInt
 
-    edge(i) = new Edge(node(u), node(v), capacity)
+    edges(i) = new Edge(nodes(u), nodes(v), capacity)
 
-    node(u) ! edge(i)
-    node(v) ! edge(i)
+    nodes(u) ! edges(i)
+    nodes(v) ! edges(i)
   }
 
-  control ! node
-  control ! edge
+  control ! nodes
+  control ! edges
 
   val flow = control ? Maxflow
   val f    = Await.result(flow, t.duration)
