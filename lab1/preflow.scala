@@ -46,7 +46,7 @@ class Edge(var u: ActorRef, var v: ActorRef, var c: Int) {
       )
       f += fIncrease
     } else {
-      assert(fIncrease <= freeCapacities._2, s"$fIncrease, $freeCapacities")
+      assert(fIncrease <= freeCapacities._2, s"$fIncrease, $freeCapacities, $u $v")
       f -= fIncrease
     }
   }
@@ -62,7 +62,7 @@ class Node(val index: Int) extends Actor {
   var debug             = true // to enable printing.
   var pushesSent        = 0 // Index of last node we tried to push to
   var repliesReceived   = 0
-  var pushRejected      = false
+  var pushAccepted      = false
 
   def min(a: Int, b: Int): Int = if (a < b) a else b
 
@@ -133,7 +133,6 @@ class Node(val index: Int) extends Actor {
       for (edge <- edges) {
         val otherNode = other(edge, self)
         otherNode ! PushRequest(edge.c, height, self, edge)
-
       }
     }
 
@@ -150,23 +149,30 @@ class Node(val index: Int) extends Actor {
 
     case PushRequest(excess: Int, height: Int, sender: ActorRef, edge: Edge) =>
       enter("Recevied PushRequest")
-      if (this.height < height) {
-        changeExcess(excess)
-        edge.increaseF(self, excess)
-        sender ! PushResponse(true, PushRequest(excess, height, sender, edge))
-        pushToEveryone
-      } else {
-        sender ! PushResponse(false, PushRequest(excess, height, sender, edge))
+      if (excess == 0) sender ! PushResponse(false, PushRequest(excess, height, sender, edge))
+      else {
+        if (this.height < height) {
+          edge.increaseF(self, excess)
+          changeExcess(excess)
+          sender ! PushResponse(true, PushRequest(excess, height, sender, edge))
+          if (source) control ! SourceFlowUpdate(calculateFlow)
+          pushToEveryone
+        } else {
+          sender ! PushResponse(false, PushRequest(excess, height, sender, edge))
+        }
       }
       exit("Received PushRequest")
 
     case PushResponse(accepted: Boolean, responseTo: PushRequest) =>
       enter("PushResponse")
-      if (!accepted) {
+      repliesReceived += 1
+      if (accepted) {
+        pushAccepted = true
+        if (source) control ! SourceFlowUpdate(calculateFlow)
+      } else {
         changeExcess(responseTo.excess)
-        pushRejected = true
-        pushToEveryone
       }
+      pushToEveryone
       exit("PushResponse")
 
     case m => {
@@ -190,16 +196,16 @@ class Node(val index: Int) extends Actor {
             val edge      = edges(edgeIndex)
             val otherNode = other(edge, self)
             val toSend    = edge.pushFrom(self, excess)
-            if (toSend > 0) otherNode ! PushRequest(toSend, this.height, self, edge)
             this.excess -= toSend
             pushesSent += 1
+            otherNode ! PushRequest(toSend, this.height, self, edge)
           }
         }
-      } else if (pushRejected) {
-        relabel
+      } else if (repliesReceived == pushesSent) {
+        if (!pushAccepted) relabel
         pushesSent = 0
         repliesReceived = 0
-        pushRejected = false
+        pushAccepted = false
         pushToEveryone
       }
     }
