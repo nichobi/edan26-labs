@@ -59,7 +59,7 @@ class Node(val index: Int) extends Actor {
   var source: Boolean   = false // true if we are the source.
   var sink: Boolean     = false // true if we are the sink.
   var edges: List[Edge] = Nil // adjacency list with edge objects shared with other nodes.
-  var debug             = true // to enable printing.
+  var debug             = false // to enable printing. DEBUG
   var pushesSent        = 0 // Index of last node we tried to push to
   var repliesReceived   = 0
   var pushAccepted      = false
@@ -111,7 +111,7 @@ class Node(val index: Int) extends Actor {
 
   def receive = {
     case any =>
-      println(s"$id received: $any")
+      //println(s"$id received: $any") //DEBUG
       receive2(any)
   }
 
@@ -128,7 +128,7 @@ class Node(val index: Int) extends Actor {
     }
 
     case Start => {
-      println("We are starting")
+      //println("We are starting") //DEBUG
       assert(source)
       for (edge <- edges) {
         val otherNode = other(edge, self)
@@ -182,16 +182,16 @@ class Node(val index: Int) extends Actor {
     assert(false)
   }
 
-  def edgesToSendTo: Seq[Int] = {
-    val (previous, next) = edges.indices.splitAt(pushesSent)
-    return next ++ previous
-  }
+  //def edgesToSendTo: Seq[Int] = {
+  //  val (previous, next) = edges.indices.splitAt(pushesSent)
+  //  return next ++ previous
+  //}
 
   def pushToEveryone: Unit = {
     enter("pushToEveryone")
     if (!sink && !source) {
       if (pushesSent < edges.size) {
-        for (edgeIndex <- edgesToSendTo) {
+        for (edgeIndex <- pushesSent until edges.size) {
           if (excess > 0) {
             val edge      = edges(edgeIndex)
             val otherNode = other(edge, self)
@@ -251,13 +251,13 @@ class Controller extends Actor {
 
     case SourceFlowUpdate(f) => {
       sourceFlow = f
-      println(s"SourceFlowUpdate: source=$sourceFlow, sink=$sinkFlow")
+      //println(s"SourceFlowUpdate: source=$sourceFlow, sink=$sinkFlow") //DEBUG
       if (sourceFlow == sinkFlow) endProgram
     }
 
     case SinkFlowUpdate(f) => {
       sinkFlow = f
-      println(s"SinkFlowUpdate: source=$sourceFlow, sink=$sinkFlow")
+      //println(s"SinkFlowUpdate: source=$sourceFlow, sink=$sinkFlow") //DEBUG
       if (sourceFlow == sinkFlow) endProgram
     }
   }
