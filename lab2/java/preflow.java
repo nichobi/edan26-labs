@@ -58,9 +58,11 @@ class Graph {
 
   void relabel(Node u)
   {
-    u.h+=1;
-    P.f("relabel %d now h = %d\n", u.i, u.h);
-    enter_excess(u);
+    synchronized (u) {
+      u.h+=1;
+      P.f("relabel %d now h = %d\n", u.i, u.h);
+      enter_excess(u);
+    }
   }
 
   void push(Node u, Node v, Edge e) {
@@ -175,6 +177,7 @@ class Graph {
                 }
 
                 if (u.h > v.h && b * e.f < e.c) {
+                  push(u, v, e);
                   break;
                 } else
                   v = null;
@@ -192,6 +195,7 @@ class Graph {
                 }
 
                 if (u.h > v.h && b * e.f < e.c) {
+                  push(u, v, e);
                   break;
                 } else
                   v = null;
@@ -200,9 +204,7 @@ class Graph {
           }
         }
 
-        if (v != null)
-          push(u, v, e);
-        else
+        if(v == null)
           relabel(u);
         u = leave_excess();
       }
