@@ -6,7 +6,7 @@ import java.util.LinkedList;
 import java.io.*;
 
 class P {
-  static boolean print = true;
+  static boolean print = false;
   static void p(String string) {
     if(print) System.out.println(string);
   }
@@ -14,7 +14,6 @@ class P {
     if(print) System.out.printf(string, objects);
   }
 }
-
 
 class Graph {
 
@@ -34,12 +33,19 @@ class Graph {
     this.m    = edge.length;
   }
 
-  void enter_excess(Node u)
+  synchronized void enter_excess(Node u)
   {
     if (u != node[s] && u != node[t]) {
       u.next = excess;
       excess = u;
     }
+  }
+
+  synchronized Node leave_excess()
+  {
+      Node temp = excess;
+      if(excess != null) excess = excess.next;
+      return temp;
   }
 
   Node other(Edge a, Node u)
@@ -100,7 +106,7 @@ class Graph {
     }
   }
 
-  int preflow(int s, int t)
+  int preflow(int s, int t, int nthread)
   {
     ListIterator<Edge>  iter;
     int      b;
@@ -121,38 +127,87 @@ class Graph {
       push(node[s], other(e, node[s]), e);
     }
 
-    while (excess != null) {
-      u = excess;
-      v = null;
-      e = null;
-      excess = u.next;
-      P.f("selected u = %d with ", u.i);
-      P.f("h = %d and e = %d\n", u.h, u.e);
-
-      iter = u.adj.listIterator();
-      while (iter.hasNext()) {
-        e = iter.next();
-        if (u == e.u) {
-          v = e.v;
-          b = 1;
-        } else {
-          v = e.u;
-          b = -1;
-        }
-
-        if (u.h > v.h && b * e.f < e.c)
-          break;
-        else
-          v = null;
+    Work[] work = new Work[nthread];
+    for (int i = 0; i < nthread; ++i)
+      work[i] = new Work();
+    for (int i = 0; i < nthread; ++i)
+      work[i].start();
+    for (int i = 0; i < nthread; ++i) {
+      try {
+        work[i].join();
+      } catch (Exception ex) {
+        System.out.println("" + ex);
       }
-
-      if (v != null)
-        push(u, v, e);
-      else
-        relabel(u);
     }
 
     return node[t].e;
+  }
+
+
+
+  class Work extends Thread {
+    ListIterator<Edge>  iter;
+    int      b;
+    Edge      e;
+    Node      u;
+    Node      v;
+    public void run()
+    {
+      u = leave_excess();
+      while (u != null) {
+        v = null;
+        e = null;
+        P.f("selected u = %d with ", u.i);
+        P.f("h = %d and e = %d\n", u.h, u.e);
+
+        iter = u.adj.listIterator();
+        while (iter.hasNext()) {
+          e = iter.next();
+          if (e.u.i < e.v.i) {
+            synchronized (e.u) {
+              synchronized (e.v) {
+                if (u == e.u) {
+                  v = e.v;
+                  b = 1;
+                } else {
+                  v = e.u;
+                  b = -1;
+                }
+
+                if (u.h > v.h && b * e.f < e.c) {
+                  break;
+                } else
+                  v = null;
+              }
+            }
+          } else {
+            synchronized (e.v) {
+              synchronized (e.u) {
+                if (u == e.u) {
+                  v = e.v;
+                  b = 1;
+                } else {
+                  v = e.u;
+                  b = -1;
+                }
+
+                if (u.h > v.h && b * e.f < e.c) {
+                  break;
+                } else
+                  v = null;
+              }
+            }
+          }
+        }
+
+        if (v != null)
+          push(u, v, e);
+        else
+          relabel(u);
+        u = leave_excess();
+      }
+      System.out.println("Thread exited\n");
+    }
   }
 }
 
@@ -219,7 +274,7 @@ class Preflow {
     }
 
     g = new Graph(node, edge);
-    f = g.preflow(0, n-1);
+    f = g.preflow(0, n-1, 4);
     double  end = System.currentTimeMillis();
     System.out.println("t = " + (end - begin) / 1000.0 + " s");
     System.out.println("f = " + f);
