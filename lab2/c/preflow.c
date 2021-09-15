@@ -448,7 +448,9 @@ static void* work(void* gIn) {
   node_t*    v;
   edge_t*    e;
   list_t*    p;
-  int    b;
+  int        b;
+
+  int        nodesProcessed = 0;
   graph_t* g = (graph_t*) gIn;
   while ((u = leave_excess(g)) != NULL) {
 
@@ -492,6 +494,7 @@ static void* work(void* gIn) {
         v = NULL;
       pthread_mutex_unlock(&e->u->mutex);
       pthread_mutex_unlock(&e->v->mutex);
+      nodesProcessed++;
     }
 
     if (v != NULL) {
@@ -501,6 +504,7 @@ static void* work(void* gIn) {
     } else
       relabel(g, u);
   }
+  printf("Thread exited, %d nodes processed\n", nodesProcessed);
 }
 
 static int preflow(graph_t* g)
