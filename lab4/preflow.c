@@ -70,25 +70,29 @@ typedef struct push_list_t	push_list_t;
 typedef struct node_list_t	node_list_t;
 typedef struct push_t	push_t;
 typedef struct work_arg_t	work_arg_t;
+typedef struct node_list_t node_list_t;
 
 struct list_t {
 	edge_t*		edge;
 	list_t*		next;
 };
 
-struct push_list_t {
-	push_t*		   push;
-	push_list_t* next;
-};
-
-struct node_list_t {
-	node_t*		   node;
-	node_list_t* next;
-};
-
 struct work_arg_t {
 	int		   index;
 	graph_t* g;
+  int      nThreads;
+};
+
+struct push_list_t {
+  push_t* a;
+  int     c;
+  int     i;
+};
+
+struct node_list_t {
+  node_t** a;
+  int      c;
+  int      i;
 };
 
 struct node_t {
@@ -110,6 +114,7 @@ struct push_t {
   node_t* u; // Push from u
   node_t* v; // Push to v
   edge_t* e; // Edge to push along
+  int d; // Directed flow to push
 };
 
 struct graph_t {
@@ -121,10 +126,9 @@ struct graph_t {
 	node_t*		t;	/* sink.			*/
 	node_t*		excess;	/* nodes with e > 0 except s,t.	*/
   pthread_barrier_t barrier;
-  push_list_t** pushLists;
-  push_list_t** freePushLists;
-  node_list_t** relabelLists;
-  node_list_t** workLists;
+  push_list_t** pushes;
+  node_list_t** relabels;
+  node_list_t* workList;
   pthread_mutex_t mutex;
   int done;
 };
@@ -314,40 +318,65 @@ static void add_edge(node_t* u, edge_t* e)
 	u->edge = p;
 }
 
-static push_list_t* add_push(push_list_t* oldList, push_t* push)
+static void add_push(graph_t* g, node_t* u, node_t* v, edge_t* e, int threadIndex)
 {
-	push_list_t*		newLink;
+  int d;
+  if (g->pushes[threadIndex]->i == g->pushes[threadIndex]->c) {
+    push_t* b;
+    g->pushes[threadIndex]->c *= 2; // double the capacity
+    b = realloc(g->pushes[threadIndex]->a, g->pushes[threadIndex]->c * sizeof(g->pushes[threadIndex]->a[0]));
+    if (b == NULL)
+      error("no memory");
+    g->pushes[threadIndex]->a = b;
+  }
 
-	/* allocate memory for a list link and put it first
-	 * in the returned list;
-   *
-	 */
+	if (u == e->u) {
+		d = MIN(u->e, e->c - e->f);
+		e->f += d;
+	} else {
+		d = MIN(u->e, e->c + e->f);
+		e->f -= d;
+	}
 
-	newLink = xmalloc(sizeof(push_list_t));
-	newLink->push = push;
-	newLink->next = oldList;
-	return newLink;
+  pr("add_push changing excess node:%d, e=%d, d=%d\n", id(g,u), u->e, d);
+  u->e -= d;
+
+  int i = g->pushes[threadIndex]->i++;
+  g->pushes[threadIndex]->a[i].u = u;
+  g->pushes[threadIndex]->a[i].v = v;
+  g->pushes[threadIndex]->a[i].e = e;
+  g->pushes[threadIndex]->a[i].d = d;
 }
 
-static push_list_t* take_push(push_list_t* pushes) {
-  push_list_t* head = pushes;
-  pushes = head->next;
-  return head;
+static void add_relabel(graph_t* g, node_t* u, int threadIndex) {
+  if (g->relabels[threadIndex]->i == g->relabels[threadIndex]->c) {
+    node_t** b;
+    g->relabels[threadIndex]->c *= 2; // double the capacity
+    b = realloc(g->relabels[threadIndex]->a, g->relabels[threadIndex]->c * sizeof(g->relabels[threadIndex]->a[0]));
+    if (b == NULL)
+      error("no memory");
+    g->relabels[threadIndex]->a = b;
+  }
+
+  g->relabels[threadIndex]->a[g->relabels[threadIndex]->i] = u;
+  g->relabels[threadIndex]->i += 1;
 }
 
-static node_list_t* add_node(node_list_t* oldList, node_t* node)
-{
-	node_list_t*		newLink;
+static void add_work(graph_t* g, node_t* u) {
+  if (g->workList->i == g->workList->c) {
+    node_t** b;
+    g->workList->c *= 2; // double the capacity
+    b = realloc(g->workList->a, g->workList->c * sizeof(g->workList->a[0]));
+    if (b == NULL)
+      error("no memory");
+    for(int i = g->workList->i; i < g->workList->c; i++){
+      b[i] = NULL;
+    }
+    g->workList->a = b;
+  }
 
-	/* allocate memory for a list link and put it first
-	 * in the returned list;
-   *
-	 */
-
-	newLink = xmalloc(sizeof(node_list_t));
-	newLink->node = node;
-	newLink->next = oldList;
-	return newLink;
+  g->workList->a[g->workList->i] = u;
+  g->workList->i+=1;
 }
 
 static void connect(node_t* u, node_t* v, int c, edge_t* e)
@@ -379,6 +408,7 @@ static graph_t* new_graph(FILE* in, int n, int m, int nThreads)
 
 	g->n = n;
 	g->m = m;
+  g->done = 0;
 
 	g->v = xcalloc(n, sizeof(node_t));
 	g->e = xcalloc(m, sizeof(edge_t));
@@ -396,17 +426,30 @@ static graph_t* new_graph(FILE* in, int n, int m, int nThreads)
 		connect(u, v, c, g->e+i);
 	}
 
-  g->pushLists = xcalloc(nThreads, sizeof(push_list_t*));
-  g->freePushLists = xcalloc(nThreads, sizeof(push_list_t*));
-  g->relabelLists = xcalloc(nThreads, sizeof(node_list_t*));
-  g->workLists = xcalloc(nThreads, sizeof(node_list_t*));
+  g->pushes = xcalloc(nThreads, sizeof(push_list_t*));
+  for (int i = 0; i < nThreads; i++){
+    g->pushes[i] = xmalloc(sizeof(push_list_t));
+    g->pushes[i]->c = 8;
+    g->pushes[i]->a = malloc(g->pushes[i]->c * sizeof(push_t));
+    if(g->pushes[i]->a == NULL) error("no memory");
+    g->pushes[i]->i = 0;
+  }
 
-  //assert(g->workLists != 0);
-  //pr("workLists %p\n", g->workLists);
-  //pr("[0] %p\n", g->workLists[0]);
-  //assert(g->workLists[0]->node == g->s);
-  //g->workLists[0] = add_node(g->workLists[0], g->s);
-  //pr("[0] %p\n", g->workLists[0]);
+  g->relabels = xcalloc(nThreads, sizeof(node_list_t*));
+  for (int i = 0; i < nThreads; i++){
+    g->relabels[i] = xmalloc(sizeof(node_list_t));
+    g->relabels[i]->c = 8;
+    g->relabels[i]->a = malloc(g->relabels[i]->c * sizeof(push_t));
+    if(g->relabels[i]->a == NULL) error("no memory");
+    g->relabels[i]->i = 0;
+  }
+
+  g->workList = xmalloc(sizeof(node_list_t));
+  g->workList->c = 8;
+  g->workList->a = malloc(c * sizeof(push_t));
+  if(g->workList->a == NULL) error("no memory");
+  g->workList->a = malloc(c * sizeof(push_t));
+  g->workList->i = 0;
 
   if(pthread_barrier_init(&g->barrier, NULL, nThreads + 1) != 0) //nThreads+1 because of main thread
     error("g pthread_barrier_init failed");
@@ -449,34 +492,28 @@ static node_t* leave_excess(graph_t* g)
 	if (v != NULL) {
     v->inExcess = 0;
 		g->excess = v->next;
+    assert(v->e > 0);
   }
 
 	return v;
 }
 
-static void push(graph_t* g, node_t* u, node_t* v, edge_t* e)
+static void push(graph_t* g, node_t* u, node_t* v, edge_t* e, int d)
 {
-	int		d;	/* remaining capacity of the edge. */
+	//int		d;	/* remaining capacity of the edge. */
 
 	pr("push from %d to %d: ", id(g, u), id(g, v));
 	pr("f = %d, c = %d, so ", e->f, e->c);
 
-	if (u == e->u) {
-		d = MIN(u->e, e->c - e->f);
-		e->f += d;
-	} else {
-		d = MIN(u->e, e->c + e->f);
-		e->f -= d;
-	}
-
 	pr("pushing %d\n", d);
 
-	u->e -= d;
+	//u->e -= d; //Move this to add_push
+  pr("push changing excess node:%d, e=%d, d=%d\n", id(g,v), v->e, d);
 	v->e += d;
 
 	/* the following are always true. */
 
-	assert(d >= 0);
+	assert(d > 0);
 	assert(u->e >= 0);
 	assert(abs(e->f) <= e->c);
 
@@ -493,7 +530,6 @@ static void push(graph_t* g, node_t* u, node_t* v, edge_t* e)
 		 * can now push.
 		 *
 		 */
-
     enter_excess(g, v);
 	}
 }
@@ -535,34 +571,29 @@ static int areWeDone(graph_t* g) {
 
 static void* work(void* argsIn) {
   work_arg_t* args = (work_arg_t*) argsIn;
-  graph_t* g = args->g;
-  int index = args->index;
-  //node_t*    s;
+  graph_t* g       = args->g;
+  int index        = args->index;
+  int nThreads     = args->nThreads;
   node_t*    u;
   node_t*    v;
   edge_t*    e;
   list_t*    p;
   int        b;
   int        hasPushed = 0;
-  //push_list_t* pushes;
-  //node_list_t* relabels;
 
   int        nodesProcessed = 0;
-  while(1){
-    //pr("Thread %d waiting at barrier 2\n", index);
-    pthread_barrier_wait(&g->barrier); //Wait for main thread to finish processing
-    if(g->done) break;
-    //node_list_t* workList = g->workLists[index];
-    //pr("Worklist is %d\n", g->workLists[index]);
-    while (g->workLists[index] != NULL) {
-      u = g->workLists[index]->node;
-      g->workLists[index] = g->workLists[index]->next;
-      //pr("Worklist is now %p\n", g->workLists[index]);
+  while(!g->done){
+    int numberOfWorks = (g->workList->i + (nThreads - 1))/nThreads + 1;
+    int start = numberOfWorks*index;
+    int end = numberOfWorks*(index+1);
+    for(int i = start; i < end && i < g->workList->i; i++) {
+      u = g->workList->a[i];
 
       /* u is any node with excess preflow. */
 
       pr("Thread %d takes node %d from excess list\n", index, id(g, u));
       pr("with h = %d and e = %d\n", u->h, u->e);
+      assert(u->e > 0);
 
       /* if we can push we must push and only if we could
        * not push anything, we are allowed to relabel.
@@ -576,7 +607,7 @@ static void* work(void* argsIn) {
       v = NULL;
       p = u->edge;
 
-      while (p != NULL) {
+      while (p != NULL && u->e > 0) {
         e = p->edge;
         p = p->next;
         if (u == e->u) {
@@ -589,14 +620,8 @@ static void* work(void* argsIn) {
 
         if (u->h > v->h && b * e->f < e->c) {
           hasPushed = 1;
-          // TODO:Take pushes from freePushLists
-          push_t* push = xmalloc(sizeof(push_t));
-          //*push = (push_t) {u, v, e};
-          pr("Thread %d creates push, %d->%d, e=%d\n", index, id(g,u),id(g,v),e);
-          push->u = u;
-          push->v = v;
-          push->e = e;
-          g->pushLists[index] = add_push(g->pushLists[index], push);
+          pr("Thread %d creates push, %d->%d\n", index, id(g,u),id(g,v));
+          add_push(g, u, v, e, index);
         } else
           v = NULL;
       }
@@ -604,7 +629,8 @@ static void* work(void* argsIn) {
 
       if(!hasPushed) {
         pr("Adding node %d to relabel list\n", id(g,u));
-        g->relabelLists[index] = add_node(g->relabelLists[index], u);
+        add_relabel(g, u, index);
+        //g->relabelLists[index] = add_node(g->relabelLists[index], u);
       }
 
       //if (v != NULL) {
@@ -612,20 +638,21 @@ static void* work(void* argsIn) {
       //} else
       //  relabel(g, u);
     }
-    //pr("Thread %d waiting at barrier 1\n", index);
+    pr("Thread %d waiting at barrier 1\n", index);
     pthread_barrier_wait(&g->barrier); //Tell main thread our pushList is ready
+    pr("Thread %d waiting at barrier 2\n", index);
+    pthread_barrier_wait(&g->barrier); //Wait for main thread to finish processing
   }
   printf("Thread exited, %d nodes processed\n", nodesProcessed);
 }
 
 static void divideWork(graph_t* g, int nThreads) {
   node_t* u;
-  int i = 0;
+  g->workList->i = 0;
   while ((u = leave_excess(g)) != NULL) {
-    pr("Add node %d to thread %d\n", id(g,u), i);
-    g->workLists[i] = add_node(g->workLists[i], u);
-    //pr("Hello %d", g->workLists[i]);
-    i = (i+1) % nThreads;
+    assert(u->e > 0);
+    pr("Add node %d to workList with e=%d\n", id(g,u), u->e);
+    add_work(g, u);
   }
 }
 
@@ -648,12 +675,20 @@ static int preflow(graph_t* g, int nThreads)
 	 *
 	 */
 
+  int d;
 	while (p != NULL) {
 		e = p->edge;
 		p = p->next;
 
 		s->e += e->c;
-		push(g, s, other(s, e), e);
+    if (s == e->u) {
+      d = MIN(s->e, e->c - e->f);
+      e->f += d;
+    } else {
+      d = MIN(s->e, e->c + e->f);
+      e->f -= d;
+    }
+		push(g, s, other(s, e), e, d);
 	}
 
   divideWork(g, nThreads);
@@ -665,38 +700,32 @@ static int preflow(graph_t* g, int nThreads)
   for (int i = 0; i < nThreads; i++){
     args[i].index = i;
     args[i].g = g;
+    args[i].nThreads = nThreads;
     if (pthread_create(&thread[i], NULL, work, (void*) &args[i]) != 0)
       error("pthread_create failed");
   }
 
-  while(!areWeDone(g)) {
-    pthread_barrier_wait(&g->barrier); // Let threads start making new pushlists
+  while(!g->done) {
     pthread_barrier_wait(&g->barrier); //Wait for threads to finish their pushlists
-    for(int i = 0; i < nThreads; i++){
-      g->freePushLists[i] = g->pushLists[i];
-      push_list_t* pushes = g->pushLists[i];
-      while(pushes != NULL) {
-        push_t* p = pushes->push;
-        push(g, p->u, p->v, p->e);
-        pushes = pushes->next;
+    for(int i = 0; i < nThreads; i++) {
+      for(int j = 0; j < g->pushes[i]->i; j++){
+        push_t p = g->pushes[i]->a[j];
+        push(g, p.u, p.v, p.e, p.d);
       }
-      g->pushLists[i] = NULL;
+      g->pushes[i]->i = 0;
     }
-    for(int i = 0; i < nThreads; i++){
-      while(g->relabelLists[i] != NULL) {
-        node_t* u = g->relabelLists[i]->node;
-        pr("Calling relabel on node %d", id(g,u));
-        relabel(g, u);
-        g->relabelLists[i] = g->relabelLists[i]->next;
+    for(int i = 0; i < nThreads; i++) {
+      for(int j = 0; j < g->relabels[i]->i; j++){
+        relabel(g, g->relabels[i]->a[j]);
       }
+      g->relabels[i]->i = 0;
     }
+    g->done = areWeDone(g);
     divideWork(g, nThreads);
+    pthread_barrier_wait(&g->barrier); // Let threads start making new pushlists
   }
 
-  g->done = 1;
-  pthread_barrier_wait(&g->barrier); //Wait for threads to finish their pushlists
-
-
+  pr("Program done!");
 
   // Kill threads
   for (int i = 0; i < nThreads; i++){
