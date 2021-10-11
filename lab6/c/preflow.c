@@ -338,10 +338,12 @@ static void add_push(graph_t* g, node_t* u, node_t* v, edge_t* e, int threadInde
 		e->f -= d;
 	}
 
-  //pr("add_push changing excess node:%d, e=%d, d=%d\n", id(g,u), u->e, d);
-  u->e -= d;
-  //pr("add_push changing excess node:%d, e=%d, d=%d\n", id(g,u), u->e, d);
-  v->e += d;
+  __transaction_atomic{
+    //pr("add_push changing excess node:%d, e=%d, d=%d\n", id(g,u), u->e, d);
+    u->e -= d;
+    //pr("add_push changing excess node:%d, e=%d, d=%d\n", id(g,u), u->e, d);
+    v->e += d;
+  }
 
   int i = g->pushes[threadIndex]->i++;
   g->pushes[threadIndex]->a[i].u = u;
