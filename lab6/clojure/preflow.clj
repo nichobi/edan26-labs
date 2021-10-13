@@ -1,6 +1,7 @@
 (require '[clojure.string :as str])		; for splitting an input line into words
 
-(def debug true)
+(def debug false)
+(def num-threads 4)
 
 (def print-lock (Object.))
 (defn p [& args]
@@ -188,26 +189,32 @@
   (p "Enter work")
   (let [u (remove-any excess-nodes)]
 	(let [change (ref false)]
-  (if (not= u -1) ( do
-    (p "Removed node" u "from excess-nodes with e=" (:e @(nodes u)) )
-    (do-pushes (node-adj @(nodes u)) u s t nodes edges excess-nodes change)
-    (if (not @change) ( do
-      (p "relabel node" u)
-      (relabel nodes u)
-      (insert excess-nodes u)
-    ) ( do
-      (p "node" 1 "has changed, e:" (:e @(nodes u)))
-      (if (> (:e @(nodes u)) 0) (insert excess-nodes u))
-    ))
-    (p "calling work again")
-    (recur nodes edges s t excess-nodes)
-  )))))
+  (if (not= u -1) ( dosync
+      (p "Removed node" u "from excess-nodes with e=" (:e @(nodes u)) )
+      (do-pushes (node-adj @(nodes u)) u s t nodes edges excess-nodes change)
+      (if (not @change) ( do
+        (p "relabel node" u)
+        (relabel nodes u)
+        (insert excess-nodes u)
+      ) ( do
+        (p "node" 1 "has changed, e:" (:e @(nodes u)))
+        (if (> (:e @(nodes u)) 0) (insert excess-nodes u))
+      ))
+    )
+  )
+  (if (not= u -1) (recur nodes edges s t excess-nodes))
+  ))))
+
+(defn workWrapper []
+  (work nodes edges s t excess-nodes)
 )
 
 (defn preflow []
 	(dosync (initial-pushes nodes edges s t excess-nodes))
   (p "hello")
-  (dosync (work nodes edges s t excess-nodes))
+  (let [threads (repeatedly num-threads #(Thread. workWrapper))]
+		(run! #(.start %) threads)
+		(run! #(.join %) threads))
 	(println "f =" (node-excess @(nodes t)))
 )
 
