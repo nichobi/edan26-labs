@@ -134,7 +134,7 @@ struct graph_t {
 	int		n;	/* nodes.			*/
 	int		m;	/* edges.			*/
 	node_t*		v;	/* array of n nodes.		*/
-	edge_t*		e;	/* array of m edges.		*/
+	//edge_t*		e;	/* array of m edges.		*/
 	node_t*		s;	/* source.			*/
 	node_t*		t;	/* sink.			*/
 	node_t*		excess;	/* nodes with e > 0 except s,t.	*/
@@ -340,7 +340,7 @@ static void add_edge(node_t* u, node_t* v, int i, int b)
   }
 
   //printf("u=%d\n", id(g, u));
-  printf("i=%d\n", u->edge.i);
+  //printf("i=%d\n", u->edge.i);
   u->edge.a[u->edge.i].v = v;
   u->edge.a[u->edge.i].i = i;
   u->edge.a[u->edge.i].b = b;
@@ -822,22 +822,31 @@ static int preflow(graph_t* g, int nThreads)
 	return g->t->e;
 }
 
-static void free_graph(graph_t* g)
+static void free_graph(graph_t* g, int n, int nThreads)
 {
 	int		i;
 	list_t*		p;
 	list_t*		q;
 
-	for (i = 0; i < g->n; i += 1) {
-		//p = g->v[i].edge;
-		//while (p != NULL) {
-		//	q = p->next;
-		//	free(p);
-		//	p = q;
-		//}
+  for (int i = 0; i < nThreads; i++){
+    free(g->pushes[i]->a);
+    free(g->pushes[i]);
+  }
+  free(g->pushes);
+
+  for (int i = 0; i < nThreads; i++){
+    free(g->relabels[i]->a);
+    free(g->relabels[i]);
+  }
+  free(g->relabels);
+
+  free(g->workList->a);
+  free(g->workList);
+	for (i = 0; i < n; i += 1) {
+    free(g->v[i].edge.a);
 	}
 	free(g->v);
-	free(g->e);
+	free(g->edge_data);
 	free(g);
 }
 
@@ -869,7 +878,7 @@ int main(int argc, char* argv[])
 
 	printf("f = %d\n", f);
 
-	free_graph(g);
+	free_graph(g, n, nThreads);
 
 	return 0;
 }
