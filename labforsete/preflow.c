@@ -65,7 +65,6 @@
 typedef struct graph_t	graph_t;
 typedef struct node_t	node_t;
 typedef struct edge_t	edge_t;
-typedef struct list_t	list_t;
 typedef struct push_list_t	push_list_t;
 typedef struct node_list_t	node_list_t;
 typedef struct push_t	push_t;
@@ -73,10 +72,12 @@ typedef struct work_arg_t	work_arg_t;
 typedef struct node_list_t node_list_t;
 typedef struct edge_list_t edge_list_t;
 typedef struct edge_data_t edge_data_t;
+typedef struct xedge_t	xedge_t;
 
-struct list_t {
-	edge_t*		edge;
-	list_t*		next;
+struct xedge_t {
+	int32_t		u;	/* one of the two nodes.	*/
+	int32_t		v;	/* the other. 			*/
+	int32_t		c;	/* capacity.			*/
 };
 
 struct work_arg_t {
@@ -111,7 +112,6 @@ struct node_list_t {
 struct node_t {
 	int		h;	/* height.			*/
 	int		e;	/* excess flow.			*/
-	//list_t*		edge;	/* adjacency list.		*/
 	node_t*		next;	/* with excess preflow.		*/
   edge_list_t edge;
   int  inExcess;
@@ -134,7 +134,6 @@ struct graph_t {
 	int		n;	/* nodes.			*/
 	int		m;	/* edges.			*/
 	node_t*		v;	/* array of n nodes.		*/
-	//edge_t*		e;	/* array of m edges.		*/
 	node_t*		s;	/* source.			*/
 	node_t*		t;	/* sink.			*/
 	node_t*		excess;	/* nodes with e > 0 except s,t.	*/
@@ -143,7 +142,6 @@ struct graph_t {
   push_list_t** pushes;
   node_list_t** relabels;
   node_list_t* workList;
-  pthread_mutex_t mutex;
   int done;
 };
 
@@ -319,17 +317,12 @@ static void* xcalloc(size_t n, size_t s)
 
 static void add_edge(node_t* u, node_t* v, int i, int b)
 {
-	//list_t*		p;
 
 	/* allocate memory for a list link and put it first
 	 * in the adjacency list of u.
 	 *
 	 */
 
-	//p = xmalloc(sizeof(list_t));
-	//p->edge = e;
-	//p->next = u->edge;
-	//u->edge = p;
   if (u->edge.i == u->edge.c) {
     edge_t* b;
     u->edge.c *= 2; // double the capacity
@@ -339,8 +332,6 @@ static void add_edge(node_t* u, node_t* v, int i, int b)
     u->edge.a = b;
   }
 
-  //printf("u=%d\n", id(g, u));
-  //printf("i=%d\n", u->edge.i);
   u->edge.a[u->edge.i].v = v;
   u->edge.a[u->edge.i].i = i;
   u->edge.a[u->edge.i].b = b;
@@ -415,16 +406,15 @@ static void connect(node_t* u, node_t* v, int i)
 	 *
 	 */
 
-	//e->u = u;
-	//e->v = v;
-	//e->c = c;
-
-//static void add_edge(node_t* u, node_t* v, int i, int b)
 	add_edge(u, v, i, 1);
 	add_edge(v, u, i, -1);
 }
 
+#ifdef MAIN
 static graph_t* new_graph(FILE* in, int n, int m, int nThreads)
+#else
+static graph_t* new_graph(int n, int m, int s, int t, xedge_t* e, int nThreads)
+#endif
 {
 	graph_t*	g;
 	node_t*		u;
@@ -441,7 +431,6 @@ static graph_t* new_graph(FILE* in, int n, int m, int nThreads)
   g->done = 0;
 
 	g->v = xcalloc(n, sizeof(node_t));
-	//g->e = xcalloc(m, sizeof(edge_t));
 	g->edge_data = xcalloc(m, sizeof(edge_data_t));
 
 	g->s = &g->v[0];
@@ -455,14 +444,19 @@ static graph_t* new_graph(FILE* in, int n, int m, int nThreads)
 	}
 
 	for (i = 0; i < m; i += 1) {
+#ifdef MAIN
 		a = next_int();
 		b = next_int();
 		c = next_int();
+#else
+		a = e[i].u;
+		b = e[i].v;
+		c = e[i].c;
+#endif
 		u = &g->v[a];
 		v = &g->v[b];
     g->edge_data[i].c = c;
     g->edge_data[i].f = 0;
-//static void connect(node_t* u, node_t* v, int i)
 		connect(u, v, i);
 	}
 
@@ -493,9 +487,6 @@ static graph_t* new_graph(FILE* in, int n, int m, int nThreads)
 
   if(pthread_barrier_init(&g->barrier, NULL, nThreads + 1) != 0) //nThreads+1 because of main thread
     error("g pthread_barrier_init failed");
-  if(pthread_mutex_init(&g->mutex, NULL) != 0)
-    error("g pthread_mutex_init failed");
-
 
 	return g;
 }
@@ -540,7 +531,6 @@ static node_t* leave_excess(graph_t* g)
 
 static void push(graph_t* g, node_t* u, node_t* v, int edge_i, int d)
 {
-	//int		d;	/* remaining capacity of the edge. */
 
 	pr("push from %d to %d: ", id(g, u), id(g, v));
 	pr("f = %d, c = %d, so ", g->edge_data[edge_i].f, g->edge_data[edge_i].c);
@@ -577,35 +567,11 @@ static void push(graph_t* g, node_t* u, node_t* v, int edge_i, int d)
 static void relabel(graph_t* g, node_t* u)
 {
 	u->h += 1;
-
 	pr("relabel %d now h = %d\n", id(g, u), u->h);
-
   enter_excess(g, u);
 }
 
-//static node_t* other(node_t* u, edge_t* e)
-//{
-//	if (u == e->u)
-//		return e->v;
-//	else
-//		return e->u;
-//}
-
-static int areWeDone(graph_t* g) {
-  //node_t* source = g->s;
-  //int sourceFlow = 0;
-  //edge_t* e;
-  ////list_t* p = source->edge;
-  //while (p != NULL) {
-  //  e = p->edge;
-  //  p = p->next;
-  //  if(source == e->u){
-  //    sourceFlow += e->f;
-  //  } else {
-  //    sourceFlow -= e->f;
-  //  }
-  //}
-
+static int check_done(graph_t* g) {
   pr("s->e=%d\n", g->s->e);
   pr("t->e=%d\n", g->t->e);
   return -g->s->e == g->t->e;
@@ -617,9 +583,7 @@ static void* work(void* argsIn) {
   int index        = args->index;
   int nThreads     = args->nThreads;
   node_t*    u;
-  //node_t*    v;
   edge_t*    e;
-  list_t*    p;
   int        b;
   int        d;
   int        hasPushed = 0;
@@ -647,73 +611,40 @@ static void* work(void* argsIn) {
        */
 
       hasPushed = 0;
-      //v = NULL;
-      //p = u->edge;
 
       for(int i = 0; i < u->edge.i && u->e > 0; i++) {
         pr("Node %d checking edge %d\n", id(g,u), i);
         int edge_i = u->edge.a[i].i;
         edge_data_t e = g->edge_data[edge_i];
-        //s->e += e->c;
         if (u->edge.a[i].b == 1) {
           d = MIN(u->e, e.c - e.f);
-          //e.f += d;
         } else {
           d = MIN(u->e, e.c + e.f);
-          //e.f -= d;
         }
-        //push(g, s, s->edge.a[i]->v, edge_i, d);
         pr("u->h > u->edge.a[i].v->h = %d\n", u->h > u->edge.a[i].v->h);
         pr("u->edge.a[i].b * e.f < e.c = %d\n", u->edge.a[i].b * e.f < e.c);
         pr("u->edge.a[i].b = %d\ne.f = %d\ne.c = %d\n", u->edge.a[i].b, e.f, e.c);
         if (u->h > u->edge.a[i].v->h && u->edge.a[i].b * e.f < e.c) {
           hasPushed = 1;
           pr("Thread %d creates push, %d->%d\n", index, id(g,u), id(g,u->edge.a[i].v));
-//static void add_push(graph_t* g, node_t* u, node_t* v, int d, int threadIndex)
           add_push(g, u, u->edge.a[i].v, edge_i, d, index);
           pr("Changing e.f by %d", u->edge.a[i].b * d);
           g->edge_data[edge_i].f += u->edge.a[i].b * d;
         }
-          //v = NULL;
       }
-
-      //while (p != NULL && u->e > 0) {
-      //  e = p->edge;
-      //  p = p->next;
-      //  if (u == e->u) {
-      //    v = e->v;
-      //    b = 1;
-      //  } else {
-      //    v = e->u;
-      //    b = -1;
-      //  }
-
-      //  if (u->h > v->h && b * e->f < e->c) {
-      //    hasPushed = 1;
-      //    pr("Thread %d creates push, %d->%d\n", index, id(g,u),id(g,v));
-      //    add_push(g, u, v, e, index);
-      //  } else
-      //    v = NULL;
-      //}
       nodesProcessed++;
 
       if(!hasPushed) {
         pr("Adding node %d to relabel list\n", id(g,u));
         add_relabel(g, u, index);
-        //g->relabelLists[index] = add_node(g->relabelLists[index], u);
       }
-
-      //if (v != NULL) {
-      //  push(g, u, v, e);
-      //} else
-      //  relabel(g, u);
     }
     pr("Thread %d waiting at barrier 1\n", index);
     pthread_barrier_wait(&g->barrier); //Tell main thread our pushList is ready
     pr("Thread %d waiting at barrier 2\n", index);
     pthread_barrier_wait(&g->barrier); //Wait for main thread to finish processing
   }
-  printf("Thread exited, %d nodes processed\n", nodesProcessed);
+  //printf("Thread exited, %d nodes processed\n", nodesProcessed);
 }
 
 static void divideWork(graph_t* g, int nThreads) {
@@ -725,20 +656,17 @@ static void divideWork(graph_t* g, int nThreads) {
     add_work(g, u);
   }
 }
-//int preflow(int n, int m, int s, int t, xedge_t* e)
-static int preflow(graph_t* g, int nThreads)
+
+static int xpreflow(graph_t* g, int nThreads)
 {
 	node_t*		s;
 	node_t*		u;
 	node_t*		v;
 	edge_t*		e;
-	list_t*		p;
 	int		b;
 
 	s = g->s;
 	s->h = g->n;
-
-	//p = s->edge;
 
 	/* start by pushing as much as possible (limited by
 	 * the edge capacity) from the source to its neighbors.
@@ -760,20 +688,6 @@ static int preflow(graph_t* g, int nThreads)
     }
 		push(g, s, s->edge.a[i].v, edge_i, d);
   }
-	//while (p != NULL) {
-	//	e = p->edge;
-	//	p = p->next;
-
-	//	s->e += e->c;
-  //  if (s == e->u) {
-  //    d = MIN(s->e, e->c - e->f);
-  //    e->f += d;
-  //  } else {
-  //    d = MIN(s->e, e->c + e->f);
-  //    e->f -= d;
-  //  }
-	//	push(g, s, other(s, e), e, d);
-	//}
 
   divideWork(g, nThreads);
 
@@ -794,7 +708,6 @@ static int preflow(graph_t* g, int nThreads)
     for(int i = 0; i < nThreads; i++) {
       for(int j = 0; j < g->pushes[i]->i; j++){
         push_t p = g->pushes[i]->a[j];
-//static void push(graph_t* g, node_t* u, node_t* v, int edge_i, int d)
         push(g, p.u, p.v, p.edge_i, p.d);
       }
       g->pushes[i]->i = 0;
@@ -805,18 +718,16 @@ static int preflow(graph_t* g, int nThreads)
       }
       g->relabels[i]->i = 0;
     }
-    g->done = areWeDone(g);
+    g->done = check_done(g);
     divideWork(g, nThreads);
     pthread_barrier_wait(&g->barrier); // Let threads start making new pushlists
   }
 
   pr("Program done!");
 
-  // Kill threads
+  // Wait for threads to finish
   for (int i = 0; i < nThreads; i++){
     pthread_join(thread[i], NULL);
-    //if (pthread_exit(&thread[i], NULL, work, (void*) &args[i]) != 0)
-    //  error("pthread_create failed");
   }
 
 	return g->t->e;
@@ -825,8 +736,6 @@ static int preflow(graph_t* g, int nThreads)
 static void free_graph(graph_t* g, int n, int nThreads)
 {
 	int		i;
-	list_t*		p;
-	list_t*		q;
 
   for (int i = 0; i < nThreads; i++){
     free(g->pushes[i]->a);
@@ -850,6 +759,21 @@ static void free_graph(graph_t* g, int n, int nThreads)
 	free(g);
 }
 
+#ifndef MAIN
+int preflow(int n, int m, int s, int t, xedge_t* e)
+{
+	graph_t*	g;
+	int		f;
+  int nThreads = 4;
+
+	g = new_graph(n, m, s, t, e, nThreads);
+	f = xpreflow(g, nThreads);
+	free_graph(g, n, nThreads);
+	return f;
+}
+#endif
+
+#ifdef MAIN
 int main(int argc, char* argv[])
 {
 	FILE*		in;	/* input file set to stdin	*/
@@ -874,7 +798,7 @@ int main(int argc, char* argv[])
 
 	fclose(in);
 
-	f = preflow(g, nThreads);
+	f = xpreflow(g, nThreads);
 
 	printf("f = %d\n", f);
 
@@ -882,3 +806,4 @@ int main(int argc, char* argv[])
 
 	return 0;
 }
+#endif
