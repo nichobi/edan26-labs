@@ -81,40 +81,40 @@ struct xedge_t {
 };
 
 struct work_arg_t {
-	int		   index;
+	int			 index;
 	graph_t* g;
-  int      nThreads;
+	int			nThreads;
 };
 
 struct edge_data_t {
-  int c;
-  int f;
+	int c;
+	int f;
 };
 
 struct push_list_t {
-  push_t* a;
-  int     c;
-  int     i;
+	push_t* a;
+	int		 c;
+	int		 i;
 };
 
 struct edge_list_t {
-  edge_t* a;
-  int     c;
-  int     i;
+	edge_t* a;
+	int		 c;
+	int		 i;
 };
 
 struct node_list_t {
-  node_t** a;
-  int      c;
-  int      i;
+	node_t** a;
+	int			c;
+	int			i;
 };
 
 struct node_t {
 	int		h;	/* height.			*/
 	int		e;	/* excess flow.			*/
 	node_t*		next;	/* with excess preflow.		*/
-  edge_list_t edge;
-  int  inExcess;
+	edge_list_t edge;
+	int	inExcess;
 };
 
 struct edge_t {
@@ -124,10 +124,10 @@ struct edge_t {
 };
 
 struct push_t {
-  node_t* u; // Push from u
-  node_t* v; // Push to v
-  int     edge_i;
-  int d; // Directed flow to push
+	node_t* u; // Push from u
+	node_t* v; // Push to v
+	int		 edge_i;
+	int d; // Directed flow to push
 };
 
 struct graph_t {
@@ -137,12 +137,12 @@ struct graph_t {
 	node_t*		s;	/* source.			*/
 	node_t*		t;	/* sink.			*/
 	node_t*		excess;	/* nodes with e > 0 except s,t.	*/
-  edge_data_t* edge_data;
-  pthread_barrier_t barrier;
-  push_list_t** pushes;
-  node_list_t** relabels;
-  node_list_t* workList;
-  int done;
+	edge_data_t* edge_data;
+	pthread_barrier_t barrier;
+	push_list_t** pushes;
+	node_list_t** relabels;
+	node_list_t* workList;
+	int done;
 };
 
 /* a remark about C arrays. the phrase above 'array of n nodes' is using
@@ -242,8 +242,8 @@ void error(const char* fmt, ...)
 
 static int next_int()
 {
-        int     x;
-        int     c;
+	int		 x;
+	int		 c;
 
 	/* this is like Java's nextInt to get the next integer.
 	 *
@@ -260,10 +260,10 @@ static int next_int()
 	 */
 
 	x = 0;
-        while (isdigit(c = getchar()))
-                x = 10 * x + c - '0';
+	while (isdigit(c = getchar()))
+		x = 10 * x + c - '0';
 
-        return x;
+	return x;
 }
 
 static void* xmalloc(size_t s)
@@ -323,80 +323,75 @@ static void add_edge(node_t* u, node_t* v, int i, int b)
 	 *
 	 */
 
-  if (u->edge.i == u->edge.c) {
-    edge_t* b;
-    u->edge.c *= 2; // double the capacity
-    b = realloc(u->edge.a, u->edge.c * sizeof(u->edge.a[0]));
-    if (b == NULL)
-      error("no memory");
-    u->edge.a = b;
-  }
+	if (u->edge.i == u->edge.c) {
+		edge_t* b;
+		u->edge.c *= 2; // double the capacity
+		//printf("add_edge realloc: newsize = %d\n", u->edge.c * sizeof(u->edge.a[0]));
+		b = realloc(u->edge.a, u->edge.c * sizeof(u->edge.a[0]));
+		if (b == NULL)
+			error("no memory");
+		u->edge.a = b;
+	}
 
-  u->edge.a[u->edge.i].v = v;
-  u->edge.a[u->edge.i].i = i;
-  u->edge.a[u->edge.i].b = b;
-  u->edge.i += 1;
+	u->edge.a[u->edge.i].v = v;
+	u->edge.a[u->edge.i].i = i;
+	u->edge.a[u->edge.i].b = b;
+	u->edge.i += 1;
 }
 
 static void add_push(graph_t* g, node_t* u, node_t* v, int edge_index, int d, int threadIndex)
 {
-  //int d;
-  if (g->pushes[threadIndex]->i == g->pushes[threadIndex]->c) {
-    push_t* b;
-    g->pushes[threadIndex]->c *= 2; // double the capacity
-    b = realloc(g->pushes[threadIndex]->a, g->pushes[threadIndex]->c * sizeof(g->pushes[threadIndex]->a[0]));
-    if (b == NULL)
-      error("no memory");
-    g->pushes[threadIndex]->a = b;
-  }
+	if (g->pushes[threadIndex]->i == g->pushes[threadIndex]->c) {
+		push_t* b;
+		g->pushes[threadIndex]->c *= 2; // double the capacity
+		//printf("add_push realloc: newsize = %d\n", g->pushes[threadIndex]->c * sizeof(g->pushes[threadIndex]->a[0]));
+		b = realloc(g->pushes[threadIndex]->a, g->pushes[threadIndex]->c * sizeof(g->pushes[threadIndex]->a[0]));
+		if (b == NULL)
+			error("no memory");
+		g->pushes[threadIndex]->a = b;
+	}
 
-	//if (u == e->u) {
-	//	d = MIN(u->e, e->c - e->f);
-	//	e->f += d;
-	//} else {
-	//	d = MIN(u->e, e->c + e->f);
-	//	e->f -= d;
-	//}
+	pr("add_push changing excess node:%d, e=%d, d=%d\n", id(g,u), u->e, d);
+	u->e -= d;
 
-  pr("add_push changing excess node:%d, e=%d, d=%d\n", id(g,u), u->e, d);
-  u->e -= d;
-
-  int i = g->pushes[threadIndex]->i++;
-  g->pushes[threadIndex]->a[i].u = u;
-  g->pushes[threadIndex]->a[i].v = v;
-  g->pushes[threadIndex]->a[i].edge_i = edge_index;
-  g->pushes[threadIndex]->a[i].d = d;
+	int i = g->pushes[threadIndex]->i++;
+	g->pushes[threadIndex]->a[i].u = u;
+	g->pushes[threadIndex]->a[i].v = v;
+	g->pushes[threadIndex]->a[i].edge_i = edge_index;
+	g->pushes[threadIndex]->a[i].d = d;
 }
 
 static void add_relabel(graph_t* g, node_t* u, int threadIndex) {
-  if (g->relabels[threadIndex]->i == g->relabels[threadIndex]->c) {
-    node_t** b;
-    g->relabels[threadIndex]->c *= 2; // double the capacity
-    b = realloc(g->relabels[threadIndex]->a, g->relabels[threadIndex]->c * sizeof(g->relabels[threadIndex]->a[0]));
-    if (b == NULL)
-      error("no memory");
-    g->relabels[threadIndex]->a = b;
-  }
+	if (g->relabels[threadIndex]->i == g->relabels[threadIndex]->c) {
+		node_t** b;
+		g->relabels[threadIndex]->c *= 2; // double the capacity
+		//printf("add_relabel realloc: newsize = %d\n", g->relabels[threadIndex]->c * sizeof(g->relabels[threadIndex]->a[0]));
+		b = realloc(g->relabels[threadIndex]->a, g->relabels[threadIndex]->c * sizeof(g->relabels[threadIndex]->a[0]));
+		if (b == NULL)
+			error("no memory");
+		g->relabels[threadIndex]->a = b;
+	}
 
-  g->relabels[threadIndex]->a[g->relabels[threadIndex]->i] = u;
-  g->relabels[threadIndex]->i += 1;
+	g->relabels[threadIndex]->a[g->relabels[threadIndex]->i] = u;
+	g->relabels[threadIndex]->i += 1;
 }
 
 static void add_work(graph_t* g, node_t* u) {
-  if (g->workList->i == g->workList->c) {
-    node_t** b;
-    g->workList->c *= 2; // double the capacity
-    b = realloc(g->workList->a, g->workList->c * sizeof(g->workList->a[0]));
-    if (b == NULL)
-      error("no memory");
-    for(int i = g->workList->i; i < g->workList->c; i++){
-      b[i] = NULL;
-    }
-    g->workList->a = b;
-  }
+	if (g->workList->i == g->workList->c) {
+		node_t** b;
+		g->workList->c *= 2; // double the capacity
+		//printf("add_work realloc: newsize = %d\n", g->workList->c * sizeof(g->workList->a[0]));
+		b = realloc(g->workList->a, g->workList->c * sizeof(g->workList->a[0]));
+		if (b == NULL)
+			error("no memory");
+		for(int i = g->workList->i; i < g->workList->c; i++){
+			b[i] = NULL;
+		}
+		g->workList->a = b;
+	}
 
-  g->workList->a[g->workList->i] = u;
-  g->workList->i+=1;
+	g->workList->a[g->workList->i] = u;
+	g->workList->i+=1;
 }
 
 static void connect(node_t* u, node_t* v, int i)
@@ -428,7 +423,7 @@ static graph_t* new_graph(int n, int m, int s, int t, xedge_t* e, int nThreads)
 
 	g->n = n;
 	g->m = m;
-  g->done = 0;
+	g->done = 0;
 
 	g->v = xcalloc(n, sizeof(node_t));
 	g->edge_data = xcalloc(m, sizeof(edge_data_t));
@@ -438,9 +433,9 @@ static graph_t* new_graph(int n, int m, int s, int t, xedge_t* e, int nThreads)
 	g->excess = NULL;
 
 	for (i = 0; i < n; i += 1) {
-    g->v[i].edge.c = 2;
-    g->v[i].edge.i = 0;
-    g->v[i].edge.a = malloc(g->v[i].edge.c * sizeof(edge_t));
+		g->v[i].edge.c = 2;
+		g->v[i].edge.i = 0;
+		g->v[i].edge.a = malloc(g->v[i].edge.c * sizeof(edge_t));
 	}
 
 	for (i = 0; i < m; i += 1) {
@@ -455,38 +450,37 @@ static graph_t* new_graph(int n, int m, int s, int t, xedge_t* e, int nThreads)
 #endif
 		u = &g->v[a];
 		v = &g->v[b];
-    g->edge_data[i].c = c;
-    g->edge_data[i].f = 0;
+		g->edge_data[i].c = c;
+		g->edge_data[i].f = 0;
 		connect(u, v, i);
 	}
 
-  g->pushes = xcalloc(nThreads, sizeof(push_list_t*));
-  for (int i = 0; i < nThreads; i++){
-    g->pushes[i] = xmalloc(sizeof(push_list_t));
-    g->pushes[i]->c = 8;
-    g->pushes[i]->a = malloc(g->pushes[i]->c * sizeof(push_t));
-    if(g->pushes[i]->a == NULL) error("no memory");
-    g->pushes[i]->i = 0;
-  }
+	g->pushes = xcalloc(nThreads, sizeof(push_list_t*));
+	for (int i = 0; i < nThreads; i++){
+		g->pushes[i] = xmalloc(sizeof(push_list_t));
+		g->pushes[i]->c = 8;
+		g->pushes[i]->a = malloc(g->pushes[i]->c * sizeof(push_t));
+		if(g->pushes[i]->a == NULL) error("no memory");
+		g->pushes[i]->i = 0;
+	}
 
-  g->relabels = xcalloc(nThreads, sizeof(node_list_t*));
-  for (int i = 0; i < nThreads; i++){
-    g->relabels[i] = xmalloc(sizeof(node_list_t));
-    g->relabels[i]->c = 8;
-    g->relabels[i]->a = malloc(g->relabels[i]->c * sizeof(push_t));
-    if(g->relabels[i]->a == NULL) error("no memory");
-    g->relabels[i]->i = 0;
-  }
+	g->relabels = xcalloc(nThreads, sizeof(node_list_t*));
+	for (int i = 0; i < nThreads; i++){
+		g->relabels[i] = xmalloc(sizeof(node_list_t));
+		g->relabels[i]->c = 8;
+		g->relabels[i]->a = malloc(g->relabels[i]->c * sizeof(push_t));
+		if(g->relabels[i]->a == NULL) error("no memory");
+		g->relabels[i]->i = 0;
+	}
 
-  g->workList = xmalloc(sizeof(node_list_t));
-  g->workList->c = 8;
-  g->workList->a = malloc(c * sizeof(push_t));
-  if(g->workList->a == NULL) error("no memory");
-  g->workList->a = malloc(c * sizeof(push_t));
-  g->workList->i = 0;
+	g->workList = xmalloc(sizeof(node_list_t));
+	g->workList->c = 8;
+	g->workList->a = malloc(c * sizeof(push_t));
+	if(g->workList->a == NULL) error("no memory");
+	g->workList->i = 0;
 
-  if(pthread_barrier_init(&g->barrier, NULL, nThreads + 1) != 0) //nThreads+1 because of main thread
-    error("g pthread_barrier_init failed");
+	if(pthread_barrier_init(&g->barrier, NULL, nThreads + 1) != 0) //nThreads+1 because of main thread
+		error("g pthread_barrier_init failed");
 
 	return g;
 }
@@ -503,7 +497,7 @@ static void enter_excess(graph_t* g, node_t* v)
 	 */
 
 	if (v != g->t && v != g->s && !v->inExcess) {
-    v->inExcess = 1;
+		v->inExcess = 1;
 		v->next = g->excess;
 		g->excess = v;
 	}
@@ -521,10 +515,10 @@ static node_t* leave_excess(graph_t* g)
 	v = g->excess;
 
 	if (v != NULL) {
-    v->inExcess = 0;
+		v->inExcess = 0;
 		g->excess = v->next;
-    assert(v->e > 0);
-  }
+		assert(v->e > 0);
+	}
 
 	return v;
 }
@@ -538,7 +532,7 @@ static void push(graph_t* g, node_t* u, node_t* v, int edge_i, int d)
 	pr("pushing %d\n", d);
 
 	//u->e -= d; //Move this to add_push
-  pr("push changing excess node:%d, e=%d, d=%d\n", id(g,v), v->e, d);
+	pr("push changing excess node:%d, e=%d, d=%d\n", id(g,v), v->e, d);
 	v->e += d;
 
 	/* the following are always true. */
@@ -551,7 +545,7 @@ static void push(graph_t* g, node_t* u, node_t* v, int edge_i, int d)
 
 		/* still some remaining so let u push more. */
 
-    enter_excess(g, u);
+		enter_excess(g, u);
 	}
 
 	if (v->e == d) {
@@ -560,7 +554,7 @@ static void push(graph_t* g, node_t* u, node_t* v, int edge_i, int d)
 		 * can now push.
 		 *
 		 */
-    enter_excess(g, v);
+		enter_excess(g, v);
 	}
 }
 
@@ -568,93 +562,95 @@ static void relabel(graph_t* g, node_t* u)
 {
 	u->h += 1;
 	pr("relabel %d now h = %d\n", id(g, u), u->h);
-  enter_excess(g, u);
+	enter_excess(g, u);
 }
 
 static int check_done(graph_t* g) {
-  pr("s->e=%d\n", g->s->e);
-  pr("t->e=%d\n", g->t->e);
-  return -g->s->e == g->t->e;
+	pr("s->e=%d\n", g->s->e);
+	pr("t->e=%d\n", g->t->e);
+	return -g->s->e == g->t->e;
 }
 
 static void* work(void* argsIn) {
-  work_arg_t* args = (work_arg_t*) argsIn;
-  graph_t* g       = args->g;
-  int index        = args->index;
-  int nThreads     = args->nThreads;
-  node_t*    u;
-  edge_t*    e;
-  int        b;
-  int        d;
-  int        hasPushed = 0;
+	work_arg_t* args = (work_arg_t*) argsIn;
+	graph_t* g			 = args->g;
+	int index				= args->index;
+	int nThreads		 = args->nThreads;
+	node_t*		u;
+	edge_t*		e;
+	int				b;
+	int				d;
+	int				hasPushed = 0;
 
-  int        nodesProcessed = 0;
-  while(!g->done){
-    int numberOfWorks = (g->workList->i + (nThreads - 1))/nThreads + 1;
-    int start = numberOfWorks*index;
-    int end = numberOfWorks*(index+1);
-    for(int i = start; i < end && i < g->workList->i; i++) {
-      u = g->workList->a[i];
+	int				nodesProcessed = 0;
+	while(!g->done){
+		int numberOfWorks = (g->workList->i + (nThreads - 1))/nThreads + 1;
+		int start = numberOfWorks*index;
+		int end = numberOfWorks*(index+1);
+		for(int i = start; i < end && i < g->workList->i; i++) {
+			u = g->workList->a[i];
 
-      /* u is any node with excess preflow. */
+			/* u is any node with excess preflow. */
 
-      pr("Thread %d takes node %d from excess list\n", index, id(g, u));
-      pr("with h = %d and e = %d\n", u->h, u->e);
-      assert(u->e > 0);
+			pr("Thread %d takes node %d from excess list\n", index, id(g, u));
+			pr("with h = %d and e = %d\n", u->h, u->e);
+			assert(u->e > 0);
 
-      /* if we can push we must push and only if we could
-       * not push anything, we are allowed to relabel.
-       *
-       * we can push to multiple nodes if we wish but
-       * here we just push once for simplicity.
-       *
-       */
+			/* if we can push we must push and only if we could
+			 * not push anything, we are allowed to relabel.
+			 *
+			 * we can push to multiple nodes if we wish but
+			 * here we just push once for simplicity.
+			 *
+			 */
 
-      hasPushed = 0;
+			hasPushed = 0;
 
-      for(int i = 0; i < u->edge.i && u->e > 0; i++) {
-        pr("Node %d checking edge %d\n", id(g,u), i);
-        int edge_i = u->edge.a[i].i;
-        edge_data_t e = g->edge_data[edge_i];
-        if (u->edge.a[i].b == 1) {
-          d = MIN(u->e, e.c - e.f);
-        } else {
-          d = MIN(u->e, e.c + e.f);
-        }
-        pr("u->h > u->edge.a[i].v->h = %d\n", u->h > u->edge.a[i].v->h);
-        pr("u->edge.a[i].b * e.f < e.c = %d\n", u->edge.a[i].b * e.f < e.c);
-        pr("u->edge.a[i].b = %d\ne.f = %d\ne.c = %d\n", u->edge.a[i].b, e.f, e.c);
-        if (u->h > u->edge.a[i].v->h && u->edge.a[i].b * e.f < e.c) {
-          hasPushed = 1;
-          pr("Thread %d creates push, %d->%d\n", index, id(g,u), id(g,u->edge.a[i].v));
-          add_push(g, u, u->edge.a[i].v, edge_i, d, index);
-          pr("Changing e.f by %d", u->edge.a[i].b * d);
-          g->edge_data[edge_i].f += u->edge.a[i].b * d;
-        }
-      }
-      nodesProcessed++;
+			for(int i = 0; i < u->edge.i && u->e > 0; i++) {
+				pr("Node %d checking edge %d\n", id(g,u), i);
+				if (u->h > u->edge.a[i].v->h) {
+					int edge_i = u->edge.a[i].i;
+					edge_data_t* e = &g->edge_data[edge_i];
+					if (u->edge.a[i].b == 1) {
+						d = MIN(u->e, e->c - e->f);
+					} else {
+						d = MIN(u->e, e->c + e->f);
+					}
+					pr("u->h > u->edge.a[i].v->h = %d\n", u->h > u->edge.a[i].v->h);
+					pr("u->edge.a[i].b * e->f < e->c = %d\n", u->edge.a[i].b * e->f < e->c);
+					pr("u->edge.a[i].b = %d\ne.f = %d\ne.c = %d\n", u->edge.a[i].b, e->f, e->c);
+					if (u->edge.a[i].b * e->f < e->c) {
+						hasPushed = 1;
+						pr("Thread %d creates push, %d->%d\n", index, id(g,u), id(g,u->edge.a[i].v));
+						add_push(g, u, u->edge.a[i].v, edge_i, d, index);
+						pr("Changing e->f by %d", u->edge.a[i].b * d);
+						g->edge_data[edge_i].f += u->edge.a[i].b * d;
+					}
+				}
+			}
+			nodesProcessed++;
 
-      if(!hasPushed) {
-        pr("Adding node %d to relabel list\n", id(g,u));
-        add_relabel(g, u, index);
-      }
-    }
-    pr("Thread %d waiting at barrier 1\n", index);
-    pthread_barrier_wait(&g->barrier); //Tell main thread our pushList is ready
-    pr("Thread %d waiting at barrier 2\n", index);
-    pthread_barrier_wait(&g->barrier); //Wait for main thread to finish processing
-  }
-  //printf("Thread exited, %d nodes processed\n", nodesProcessed);
+			if(!hasPushed) {
+				pr("Adding node %d to relabel list\n", id(g,u));
+				add_relabel(g, u, index);
+			}
+		}
+		pr("Thread %d waiting at barrier 1\n", index);
+		pthread_barrier_wait(&g->barrier); //Tell main thread our pushList is ready
+		pr("Thread %d waiting at barrier 2\n", index);
+		pthread_barrier_wait(&g->barrier); //Wait for main thread to finish processing
+	}
+	//printf("Thread exited, %d nodes processed\n", nodesProcessed);
 }
 
 static void divideWork(graph_t* g, int nThreads) {
-  node_t* u;
-  g->workList->i = 0;
-  while ((u = leave_excess(g)) != NULL) {
-    assert(u->e > 0);
-    pr("Add node %d to workList with e=%d\n", id(g,u), u->e);
-    add_work(g, u);
-  }
+	node_t* u;
+	g->workList->i = 0;
+	while ((u = leave_excess(g)) != NULL) {
+		assert(u->e > 0);
+		pr("Add node %d to workList with e=%d\n", id(g,u), u->e);
+		add_work(g, u);
+	}
 }
 
 static int xpreflow(graph_t* g, int nThreads)
@@ -673,62 +669,62 @@ static int xpreflow(graph_t* g, int nThreads)
 	 *
 	 */
 
-  //initial pushes
-  int d;
-  for(int i = 0; i < s->edge.i; i++) {
-    int edge_i = s->edge.a[i].i;
-    edge_data_t e = g->edge_data[edge_i];
+	//initial pushes
+	int d;
+	for(int i = 0; i < s->edge.i; i++) {
+		int edge_i = s->edge.a[i].i;
+		edge_data_t e = g->edge_data[edge_i];
 		s->e -= e.c;
-    if (s->edge.a[i].b == 1) {
-      d = e.c;
-      e.f += d;
-    } else {
-      d = e.c;
-      e.f -= d;
-    }
+		if (s->edge.a[i].b == 1) {
+			d = e.c;
+			e.f += d;
+		} else {
+			d = e.c;
+			e.f -= d;
+		}
 		push(g, s, s->edge.a[i].v, edge_i, d);
-  }
+	}
 
-  divideWork(g, nThreads);
+	divideWork(g, nThreads);
 
-  work_arg_t* args = xcalloc(nThreads, sizeof(work_arg_t));
+	work_arg_t* args = xcalloc(nThreads, sizeof(work_arg_t));
 
-  // Create n threads
-  pthread_t* thread = (pthread_t*) malloc(nThreads * sizeof(pthread_t));
-  for (int i = 0; i < nThreads; i++){
-    args[i].index = i;
-    args[i].g = g;
-    args[i].nThreads = nThreads;
-    if (pthread_create(&thread[i], NULL, work, (void*) &args[i]) != 0)
-      error("pthread_create failed");
-  }
+	// Create n threads
+	pthread_t* thread = (pthread_t*) malloc(nThreads * sizeof(pthread_t));
+	for (int i = 0; i < nThreads; i++){
+		args[i].index = i;
+		args[i].g = g;
+		args[i].nThreads = nThreads;
+		if (pthread_create(&thread[i], NULL, work, (void*) &args[i]) != 0)
+			error("pthread_create failed");
+	}
 
-  while(!g->done) {
-    pthread_barrier_wait(&g->barrier); //Wait for threads to finish their pushlists
-    for(int i = 0; i < nThreads; i++) {
-      for(int j = 0; j < g->pushes[i]->i; j++){
-        push_t p = g->pushes[i]->a[j];
-        push(g, p.u, p.v, p.edge_i, p.d);
-      }
-      g->pushes[i]->i = 0;
-    }
-    for(int i = 0; i < nThreads; i++) {
-      for(int j = 0; j < g->relabels[i]->i; j++){
-        relabel(g, g->relabels[i]->a[j]);
-      }
-      g->relabels[i]->i = 0;
-    }
-    g->done = check_done(g);
-    divideWork(g, nThreads);
-    pthread_barrier_wait(&g->barrier); // Let threads start making new pushlists
-  }
+	while(!g->done) {
+		pthread_barrier_wait(&g->barrier); //Wait for threads to finish their pushlists
+		for(int i = 0; i < nThreads; i++) {
+			for(int j = 0; j < g->pushes[i]->i; j++){
+				push_t p = g->pushes[i]->a[j];
+				push(g, p.u, p.v, p.edge_i, p.d);
+			}
+			g->pushes[i]->i = 0;
+		}
+		for(int i = 0; i < nThreads; i++) {
+			for(int j = 0; j < g->relabels[i]->i; j++){
+				relabel(g, g->relabels[i]->a[j]);
+			}
+			g->relabels[i]->i = 0;
+		}
+		g->done = check_done(g);
+		divideWork(g, nThreads);
+		pthread_barrier_wait(&g->barrier); // Let threads start making new pushlists
+	}
 
-  pr("Program done!");
+	pr("Program done!");
 
-  // Wait for threads to finish
-  for (int i = 0; i < nThreads; i++){
-    pthread_join(thread[i], NULL);
-  }
+	// Wait for threads to finish
+	for (int i = 0; i < nThreads; i++){
+		pthread_join(thread[i], NULL);
+	}
 
 	return g->t->e;
 }
@@ -737,22 +733,22 @@ static void free_graph(graph_t* g, int n, int nThreads)
 {
 	int		i;
 
-  for (int i = 0; i < nThreads; i++){
-    free(g->pushes[i]->a);
-    free(g->pushes[i]);
-  }
-  free(g->pushes);
+	for (int i = 0; i < nThreads; i++){
+		free(g->pushes[i]->a);
+		free(g->pushes[i]);
+	}
+	free(g->pushes);
 
-  for (int i = 0; i < nThreads; i++){
-    free(g->relabels[i]->a);
-    free(g->relabels[i]);
-  }
-  free(g->relabels);
+	for (int i = 0; i < nThreads; i++){
+		free(g->relabels[i]->a);
+		free(g->relabels[i]);
+	}
+	free(g->relabels);
 
-  free(g->workList->a);
-  free(g->workList);
+	free(g->workList->a);
+	free(g->workList);
 	for (i = 0; i < n; i += 1) {
-    free(g->v[i].edge.a);
+		free(g->v[i].edge.a);
 	}
 	free(g->v);
 	free(g->edge_data);
@@ -764,7 +760,7 @@ int preflow(int n, int m, int s, int t, xedge_t* e)
 {
 	graph_t*	g;
 	int		f;
-  int nThreads = 4;
+	int nThreads = 4;
 
 	g = new_graph(n, m, s, t, e, nThreads);
 	f = xpreflow(g, nThreads);
@@ -781,7 +777,7 @@ int main(int argc, char* argv[])
 	int		f;	/* output from preflow.		*/
 	int		n;	/* number of nodes.		*/
 	int		m;	/* number of edges.		*/
-  int   nThreads = 4;
+	int	 nThreads = 4;
 
 	progname = argv[0];	/* name is a string in argv[0]. */
 
